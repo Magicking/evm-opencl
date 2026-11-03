@@ -1,0 +1,9 @@
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/alloy_rlp_derive-6573e385383d07f8.d: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/de.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/en.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/utils.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/../README.md
+
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/liballoy_rlp_derive-6573e385383d07f8.so: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/de.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/en.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/utils.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/../README.md
+
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/lib.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/de.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/en.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/utils.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-rlp-derive-0.3.16/src/../README.md:

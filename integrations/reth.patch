@@ -1,0 +1,157 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index f6aafbd936..fca64cbfef 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4251,6 +4251,14 @@ version = "0.2.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c6e8948ce679d00a02a94739ea185595dca7118ed04feb991127e443bd3d761f"
+ 
++[[package]]
++name = "fastevm"
++version = "0.1.0"
++dependencies = [
++ "alloy-primitives",
++ "evm2",
++]
++
+ [[package]]
+ name = "fastrand"
+ version = "2.5.0"
+@@ -9267,6 +9275,7 @@ dependencies = [
+  "alloy-sol-types",
+  "evm2",
+  "evm2-jit",
++ "fastevm",
+  "metrics",
+  "reth-chainspec",
+  "reth-ethereum-forks",
+diff --git a/Cargo.toml b/Cargo.toml
+index 30b19be69d..e8f5b6a16a 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -436,6 +436,9 @@ evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4
+ evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", default-features = false }
+ evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", default-features = false }
+ 
++# fastevm: external CUDA/CPU EVM engine (../fastevm), FASTEVM_BACKEND=cpu|gpu at runtime
++fastevm = { path = "../fastevm/bindings/rust/fastevm", features = ["evm2"] }
++
+ # eth
+ alloy-dyn-abi = "1.6.1"
+ alloy-primitives = { version = "1.6.1", default-features = false, features = ["map-foldhash"] }
+diff --git a/bin/reth/Cargo.toml b/bin/reth/Cargo.toml
+index 1fa034f997..260744847f 100644
+--- a/bin/reth/Cargo.toml
++++ b/bin/reth/Cargo.toml
+@@ -103,6 +103,10 @@ jit = [
+     "reth-ethereum-cli/jit",
+     "reth-node-ethereum/jit",
+ ]
++fastevm = [
++    "reth-ethereum-cli/fastevm",
++    "reth-node-ethereum/fastevm",
++]
+ gmp = [
+     "reth-ethereum-cli/gmp",
+     "reth-node-ethereum/gmp",
+diff --git a/crates/ethereum/cli/Cargo.toml b/crates/ethereum/cli/Cargo.toml
+index a7c6c75a4e..ddcd9790ae 100644
+--- a/crates/ethereum/cli/Cargo.toml
++++ b/crates/ethereum/cli/Cargo.toml
+@@ -43,6 +43,7 @@ otlp-logs = ["reth-tracing/otlp-logs", "reth-node-core/otlp-logs"]
+ dev = ["reth-cli-commands/arbitrary"]
+ 
+ jit = ["reth-node-ethereum/jit"]
++fastevm = ["reth-node-ethereum/fastevm"]
+ gmp = ["reth-node-ethereum/gmp"]
+ 
+ asm-keccak = [
+diff --git a/crates/ethereum/evm/Cargo.toml b/crates/ethereum/evm/Cargo.toml
+index b26ab41101..a70de5031f 100644
+--- a/crates/ethereum/evm/Cargo.toml
++++ b/crates/ethereum/evm/Cargo.toml
+@@ -21,6 +21,7 @@ reth-evm.workspace = true
+ reth-storage-errors = { workspace = true, optional = true }
+ evm2.workspace = true
+ evm2-jit = { workspace = true, optional = true, features = ["llvm"] }
++fastevm = { workspace = true, optional = true }
+ 
+ # Alloy
+ alloy-primitives.workspace = true
+@@ -62,6 +63,7 @@ portable = [
+     "evm2/portable",
+     "reth-evm/portable",
+ ]
++fastevm = ["std", "dep:fastevm"]
+ jit = [
+     "std",
+     "dep:evm2-jit",
+diff --git a/crates/ethereum/evm/src/factory.rs b/crates/ethereum/evm/src/factory.rs
+index 345d3cb6d0..fe7e7cfecb 100644
+--- a/crates/ethereum/evm/src/factory.rs
++++ b/crates/ethereum/evm/src/factory.rs
+@@ -431,11 +431,26 @@ impl EvmFactory for RethEvmFactory {
+         #[cfg(feature = "jit")]
+         self.configure_evm(evm);
+ 
+-        #[cfg(not(feature = "jit"))]
++        // fastevm runs depth-0 frames when FASTEVM_BACKEND=cpu|gpu is set and takes precedence
++        // over the JIT runner; frames it hands back run on the evm2 interpreter.
++        #[cfg(feature = "fastevm")]
++        if let Some(runner) = fastevm_runner() {
++            evm.set_interpreter_runner(runner);
++        }
++
++        #[cfg(not(any(feature = "jit", feature = "fastevm")))]
+         let _ = evm;
+     }
+ }
+ 
++/// The fastevm runner selected by `FASTEVM_BACKEND`, read once per process.
++#[cfg(feature = "fastevm")]
++fn fastevm_runner() -> Option<fastevm::runner::FastEvmRunner> {
++    static RUNNER: std::sync::OnceLock<Option<fastevm::runner::FastEvmRunner>> =
++        std::sync::OnceLock::new();
++    *RUNNER.get_or_init(fastevm::runner::FastEvmRunner::from_env)
++}
++
+ #[cfg(feature = "jit")]
+ impl RethEvmFactory {
+     /// Creates a new factory configuration that owns the backend.
+diff --git a/crates/ethereum/node/Cargo.toml b/crates/ethereum/node/Cargo.toml
+index 6f968280c7..9c9fa0dac8 100644
+--- a/crates/ethereum/node/Cargo.toml
++++ b/crates/ethereum/node/Cargo.toml
+@@ -122,6 +122,7 @@ account-ext = [
+     "reth-trie-common/account-ext",
+ ]
+ jit = ["reth-evm-ethereum/jit"]
++fastevm = ["reth-evm-ethereum/fastevm"]
+ asm-keccak = [
+     "alloy-primitives/asm-keccak",
+     "reth-node-core/asm-keccak",
+diff --git a/testing/ef-tests/Cargo.toml b/testing/ef-tests/Cargo.toml
+index 475be82966..b93e06f90c 100644
+--- a/testing/ef-tests/Cargo.toml
++++ b/testing/ef-tests/Cargo.toml
+@@ -13,6 +13,7 @@ workspace = true
+ 
+ [features]
+ ef-tests = []
++fastevm = ["reth-evm-ethereum/fastevm"]
+ asm-keccak = [
+     "alloy-primitives/asm-keccak",
+     "reth-evm/asm-keccak",
+diff --git a/testing/runner/Cargo.toml b/testing/runner/Cargo.toml
+index 0b6893fd8b..09f7d631b4 100644
+--- a/testing/runner/Cargo.toml
++++ b/testing/runner/Cargo.toml
+@@ -12,5 +12,8 @@ exclude.workspace = true
+ clap = { workspace = true, features = ["derive"] }
+ ef-tests.path = "../ef-tests"
+ 
++[features]
++fastevm = ["ef-tests/fastevm"]
++
+ [lints]
+ workspace = true

@@ -1,0 +1,11 @@
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/ark_std-ab283d147235a109.d: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/rand_helper.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/perf_trace.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/mod.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/rev.rs
+
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/libark_std-ab283d147235a109.rlib: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/rand_helper.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/perf_trace.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/mod.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/rev.rs
+
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/libark_std-ab283d147235a109.rmeta: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/rand_helper.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/perf_trace.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/mod.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/rev.rs
+
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/lib.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/rand_helper.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/perf_trace.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/mod.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ark-std-0.6.0/src/iterable/rev.rs:

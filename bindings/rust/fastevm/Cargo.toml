@@ -1,0 +1,22 @@
+[package]
+name = "fastevm"
+version = "0.1.0"
+edition = "2024"
+description = "Rust binding for libfastevm (C ABI) and an evm2 InterpreterRunner that executes top-level frames on it"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+default = []
+# `runner::FastEvmRunner`: evm2 InterpreterRunner (reth's EVM).
+evm2 = ["dep:evm2", "dep:alloy-primitives"]
+
+[dependencies]
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", default-features = false, features = ["std"], optional = true }
+alloy-primitives = { version = "1.5", default-features = false, optional = true }
+
+[patch."https://github.com/alloy-rs/evm2"]
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
+
+# Standalone: not a member of any parent workspace.
+[workspace]

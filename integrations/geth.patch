@@ -1,0 +1,209 @@
+diff --git a/core/vm/evm.go b/core/vm/evm.go
+index 0af6b6b4f..35a86ace1 100644
+--- a/core/vm/evm.go
++++ b/core/vm/evm.go
+@@ -155,6 +155,9 @@ func NewEVM(blockCtx BlockContext, statedb StateDB, chainConfig *params.ChainCon
+ 		jumpDests:   newMapJumpDests(),
+ 		arena:       newArena(),
+ 	}
++	if evm.Config.Engine == nil {
++		evm.Config.Engine = DefaultEngine
++	}
+ 	evm.precompiles = *activePrecompiledContracts(evm.chainRules)
+ 
+ 	switch {
+@@ -281,6 +284,11 @@ func isSystemCall(caller common.Address) bool {
+ // the necessary steps to create accounts and reverses the state in case of an
+ // execution error or failed value transfer.
+ func (evm *EVM) Call(caller common.Address, addr common.Address, input []byte, gas GasBudget, value *uint256.Int) (ret []byte, result GasBudget, err error) {
++	if evm.useEngine(caller) {
++		if res, ok := evm.Config.Engine.Execute(evm, &EngineMessage{Caller: caller, To: addr, Input: input, Gas: gas.ExecutionGas, Value: value}); ok {
++			return res.Ret, engineGas(gas, &res), res.Err
++		}
++	}
+ 	// Capture the tracer start/end events in debug mode
+ 	if evm.Config.Tracer != nil {
+ 		evm.captureBegin(evm.depth, CALL, caller, addr, input, gas, value.ToBig())
+@@ -705,6 +713,11 @@ func (evm *EVM) initNewContract(contract *Contract, address common.Address) ([]b
+ 
+ // Create creates a new contract using code as deployment code.
+ func (evm *EVM) Create(caller common.Address, code []byte, gas GasBudget, value *uint256.Int) (ret []byte, contractAddr common.Address, result GasBudget, err error) {
++	if evm.useEngine(caller) {
++		if res, ok := evm.Config.Engine.Execute(evm, &EngineMessage{Create: true, Caller: caller, Input: code, Gas: gas.ExecutionGas, Value: value}); ok {
++			return res.Ret, res.Created, engineGas(gas, &res), res.Err
++		}
++	}
+ 	contractAddr = crypto.CreateAddress(caller, evm.StateDB.GetNonce(caller))
+ 	return evm.create(caller, code, gas, value, contractAddr, CREATE)
+ }
+diff --git a/core/vm/interpreter.go b/core/vm/interpreter.go
+index 5179092a2..ccd87cf81 100644
+--- a/core/vm/interpreter.go
++++ b/core/vm/interpreter.go
+@@ -29,10 +29,11 @@ import (
+ type Config struct {
+ 	Tracer *tracing.Hooks
+ 
+-	NoBaseFee                bool  // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+-	EnablePreimageRecording  bool  // Enables recording of SHA3/keccak preimages
+-	ExtraEips                []int // Additional EIPS that are to be enabled
+-	DisableParallelExecution bool  // Disable parallel block processing
++	NoBaseFee                bool           // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
++	EnablePreimageRecording  bool           // Enables recording of SHA3/keccak preimages
++	ExtraEips                []int          // Additional EIPS that are to be enabled
++	DisableParallelExecution bool           // Disable parallel block processing
++	Engine                   ExternalEngine // Optional external engine for top-level messages
+ }
+ 
+ // ScopeContext contains the things that are per-call, such as stack and memory,
+diff --git a/go.mod b/go.mod
+index 6d079b783..1d37cc93e 100644
+--- a/go.mod
++++ b/go.mod
+@@ -136,6 +136,7 @@ require (
+ 	github.com/deepmap/oapi-codegen v1.6.0 // indirect
+ 	github.com/dlclark/regexp2 v1.7.0 // indirect
+ 	github.com/emicklei/dot v1.6.2 // indirect
++	github.com/fastevm/fastevm/bindings/go v0.0.0
+ 	github.com/fjl/gencodec v0.1.2 // indirect
+ 	github.com/garslo/gogen v0.0.0-20170306192744-1d203ffc1f61 // indirect
+ 	github.com/getsentry/sentry-go v0.27.0 // indirect
+@@ -183,3 +184,5 @@ tool (
+ 	golang.org/x/tools/cmd/stringer
+ 	google.golang.org/protobuf/cmd/protoc-gen-go
+ )
++
++replace github.com/fastevm/fastevm/bindings/go => ../fastevm/bindings/go
+diff --git a/core/vm/engine.go b/core/vm/engine.go
+new file mode 100644
+index 000000000..ef5229a60
+--- /dev/null
++++ b/core/vm/engine.go
+@@ -0,0 +1,83 @@
++// Copyright 2026 The go-ethereum Authors
++// This file is part of the go-ethereum library.
++//
++// The go-ethereum library is free software: you can redistribute it and/or modify
++// it under the terms of the GNU Lesser General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// The go-ethereum library is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU Lesser General Public License for more details.
++//
++// You should have received a copy of the GNU Lesser General Public License
++// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
++
++package vm
++
++import (
++	"github.com/ethereum/go-ethereum/common"
++	"github.com/ethereum/go-ethereum/params"
++	"github.com/holiman/uint256"
++)
++
++// EngineMessage is a top-level (depth 0) message offered to an external
++// execution engine.
++type EngineMessage struct {
++	Create bool
++	Caller common.Address
++	To     common.Address // unused for Create
++	Input  []byte         // calldata or initcode
++	Gas    uint64
++	Value  *uint256.Int
++}
++
++// EngineResult is the outcome of a message executed by an external engine.
++// The engine has already applied its state changes to evm.StateDB.
++type EngineResult struct {
++	Ret     []byte
++	GasLeft uint64
++	Err     error
++	Created common.Address
++	// Failed reports a pre-execution failure (insufficient balance, depth,
++	// nonce overflow): no state was touched and all gas is returned.
++	Failed bool
++}
++
++// ExternalEngine executes top-level messages outside the Go interpreter, e.g.
++// the fastevm CPU/CUDA engine. Execute returns ok=false to let the built-in
++// interpreter run the message instead (unsupported fork, resource limits, ...).
++type ExternalEngine interface {
++	Execute(evm *EVM, msg *EngineMessage) (res EngineResult, ok bool)
++}
++
++// DefaultEngine, when set, is installed into every EVM whose Config.Engine is nil.
++var DefaultEngine ExternalEngine
++
++// Rules returns the chain rules the EVM was configured with.
++func (evm *EVM) Rules() params.Rules { return evm.chainRules }
++
++// Precompile returns the active precompiled contract at addr, if any.
++func (evm *EVM) Precompile(addr common.Address) (PrecompiledContract, bool) {
++	return evm.precompile(addr)
++}
++
++// PrecompileCache returns the precompile result cache in use, if any.
++func (evm *EVM) PrecompileCache() *PrecompileCache { return evm.precompileCache }
++
++func (evm *EVM) useEngine(caller common.Address) bool {
++	return evm.depth == 0 && evm.Config.Engine != nil && evm.Config.Tracer == nil && !isSystemCall(caller)
++}
++
++// engineGas converts an engine result into the budget form returned by
++// Call/Create.
++func engineGas(gas GasBudget, res *EngineResult) GasBudget {
++	if res.Failed {
++		return gas
++	}
++	used := gas.ExecutionGas - res.GasLeft
++	gas.ExecutionGas = res.GasLeft
++	gas.UsedExecutionGas += used
++	return gas.Exit(res.Err)
++}
+diff --git a/tests/fastevm_test.go b/tests/fastevm_test.go
+new file mode 100644
+index 000000000..7e8fc41c9
+--- /dev/null
++++ b/tests/fastevm_test.go
+@@ -0,0 +1,38 @@
++// Copyright 2026 The go-ethereum Authors
++// This file is part of the go-ethereum library.
++//
++// The go-ethereum library is free software: you can redistribute it and/or modify
++// it under the terms of the GNU Lesser General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// The go-ethereum library is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU Lesser General Public License for more details.
++//
++// You should have received a copy of the GNU Lesser General Public License
++// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
++
++//go:build fastevm
++
++package tests
++
++import (
++	"fmt"
++	"os"
++	"testing"
++
++	"github.com/fastevm/fastevm/bindings/go/gethvm"
++)
++
++// With -tags fastevm every top-level message of the state and blockchain tests
++// runs on the fastevm engine (FASTEVM_BACKEND=cpu|gpu).
++func TestMain(m *testing.M) {
++	eng := gethvm.FromEnv()
++	gethvm.Install(eng)
++	code := m.Run()
++	fmt.Fprintf(os.Stderr, "fastevm: executed=%d fallbacks=%d skipped(fork)=%d fallback-errors=%v\n",
++		eng.Stats.Executed, eng.Stats.Fallbacks, eng.Stats.Skipped, eng.Stats.FallbackErrors)
++	os.Exit(code)
++}

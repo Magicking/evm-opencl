@@ -1,0 +1,1 @@
+{"rustc":64270464211342465,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[5987189188758335461,"build_script_build",false,14866376404098740565]],"local":[{"RerunIfEnvChanged":{"var":"FASTEVM_LIB_DIR","val":null}}],"rustflags":[],"config":0,"compile_kind":0}

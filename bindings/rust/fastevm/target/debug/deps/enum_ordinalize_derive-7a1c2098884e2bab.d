@@ -1,0 +1,9 @@
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/enum_ordinalize_derive-7a1c2098884e2bab.d: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/int128.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/int_wrapper.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/panic.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/variant_type.rs
+
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/libenum_ordinalize_derive-7a1c2098884e2bab.so: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/int128.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/int_wrapper.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/panic.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/variant_type.rs
+
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/lib.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/int128.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/int_wrapper.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/panic.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/enum-ordinalize-derive-4.4.2/src/variant_type.rs:

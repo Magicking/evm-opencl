@@ -1,0 +1,14 @@
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/thiserror-eb685544ebf71cbb.d: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/build/thiserror-df26c675650c1db2/out/private.rs
+
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/libthiserror-eb685544ebf71cbb.rlib: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/build/thiserror-df26c675650c1db2/out/private.rs
+
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/deps/libthiserror-eb685544ebf71cbb.rmeta: /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/build/thiserror-df26c675650c1db2/out/private.rs
+
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs:
+/home/magicking/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs:
+/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/build/thiserror-df26c675650c1db2/out/private.rs:
+
+# env-dep:OUT_DIR=/data/claude/fastevm/fastevm/bindings/rust/fastevm/target/debug/build/thiserror-df26c675650c1db2/out

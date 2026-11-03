@@ -1,0 +1,6 @@
+fixtures/state_tests/for_cancun/
+fixtures/state_tests/for_prague/
+fixtures/state_tests/for_osaka/
+fixtures/blockchain_tests/for_cancun/
+fixtures/blockchain_tests/for_prague/
+fixtures/blockchain_tests/for_osaka/
