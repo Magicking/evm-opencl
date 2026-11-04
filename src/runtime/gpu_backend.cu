@@ -37,7 +37,12 @@ struct KernelArgs {
   ResultPool pool;
 };
 
-__global__ void __launch_bounds__(128) lane_kernel(KernelArgs a) {
+// Threads per lane_kernel block. Lanes are register-bound (3 blocks of 128 or
+// 12 of 32 per SM), so small blocks lose no occupancy, and they spread a load
+// over every SM: 1,000 lanes in blocks of 128 would run on 8 of 34 SMs.
+constexpr uint32_t kLaneBlock = 32;
+
+__global__ void __launch_bounds__(kLaneBlock) lane_kernel(KernelArgs a) {
   uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= a.n_active) return;
   uint32_t slot = a.active[i];
@@ -360,7 +365,7 @@ class GpuBackend final : public Backend {
     a.pool.cap = pool_bytes_;
     a.pool.cursor = g.cursor.p;
     CUDA_CHECK(cudaEventRecord(g.k0, g.s));
-    lane_kernel<<<(a.n_active + 127) / 128, 128, 0, g.s>>>(a);
+    lane_kernel<<<(a.n_active + kLaneBlock - 1) / kLaneBlock, kLaneBlock, 0, g.s>>>(a);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaEventRecord(g.k1, g.s));
     g.h_events.resize(n);

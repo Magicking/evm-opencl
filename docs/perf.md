@@ -116,3 +116,49 @@ result download 3.0 ms (four 1.34 MB pools at ≈ 1.8 GB/s), calldata upload 0.6
 7. **Two groups below 4,096 lanes** serialise on state uploads (a group's upload waits for the
    other group's kernel), which halved compute-heavy batches of 1,000 in a first version; hence the
    threshold. Proposal: double-buffered device tables, so uploads never wait for a running kernel.
+
+## Kernel occupancy (lane blocks of 32)
+
+Measured on the same machine; `fastevm-run --backend gpu --warm`, best of 5.
+
+**Where the time goes.** One lane costs about 600 cycles per EVM step at 2.8 GHz (arith_loop at
+N = 1: 400k steps in 87 ms). Even a JUMPDEST costs about 350: the 256-way opcode `switch` compiles
+to an eight-level compare-and-branch tree, not a jump table, and one warp cannot hide that latency.
+The GPU only pays off with many warps per SM. `lane_kernel` uses 168 registers, so an SM holds
+3 blocks of 128 lanes (12 warps). But a load of 1,000 lanes in blocks of 128 is 8 blocks, so
+26 of the 34 SMs sit idle, and a 2,500-lane overlap load fills only 20 SMs.
+
+**Change.** `lane_kernel` now runs in blocks of 32 (`kLaneBlock`). Registers still bound occupancy
+to 12 warps per SM, so nothing is lost, and every load spreads over every SM.
+
+| program | N | before (msg/s) | after (msg/s) | change |
+|---|---:|---:|---:|---:|
+| snailtracer | 1k | 104 | 171 | +64% |
+| arith_loop | 10k | 27.0k | 34.0k | +26% |
+| blake2b_shifts | 1k | 542 | 629 | +16% |
+| keccak_loop | 10k | 34.1k | 37.8k | +11% |
+| erc20_transfer | 64 | 330 µs | 264 µs | −20% latency |
+| erc20_transfer | 1k | 1081 µs | 959 µs | −11% latency |
+| erc20_transfer | 10k | 1.20M | 1.20M | link-bound, unchanged |
+
+**Tried and dropped.**
+* *Inlining `exec()` into the kernel* (255 registers, 1.3 KB frame instead of 2.3 KB): no change.
+* *Top of the operand stack in shared memory* (a ring of K items per lane; below the window, items
+  stay in the interleaved global stack). A microbenchmark of the push/pop pattern is 9× faster on
+  shared memory than on global memory at full occupancy. In the interpreter it loses, though. The
+  shared window takes L1 capacity: shared memory and L1 are one 128 KB array per SM. With K = 8,
+  a trivial loop at 13k lanes dropped to 14.7 Gsteps/s, against 29 without the window and 43 with
+  K = 4. The window also turns every stack access into a generic load or store with a range
+  select. With blocks of 32, K = 4 helps only arith_loop (+11%) and loses 5–7% on snailtracer,
+  blake2b and keccak.
+
+**Next for compute-bound code.** The step cost is latency inside one warp: the branch-tree
+dispatch, generic loads of the code byte and `mem_size`, and 168 registers capping warps per SM.
+Candidates, in order:
+* a two-level dispatch, so the tree is not eight levels deep;
+* fewer registers, by moving rare opcodes (CREATE/CALL setup, precompiles) out of line, for more
+  warps per SM;
+* PTX carry chains for 256-bit add and multiply.
+
+Nsight Compute is installed but needs counter access (`RmProfilingAdminOnly=1`), so the
+attributions above come from SASS inspection and timing experiments.
