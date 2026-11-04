@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define FEVM_ABI_VERSION 1
+#define FEVM_ABI_VERSION 2
 
 typedef struct { uint8_t bytes[20]; } fevm_address;
 typedef struct { uint8_t bytes[32]; } fevm_bytes32;
@@ -49,6 +49,8 @@ typedef struct {
   uint32_t cpu_threads;       /* worker threads (CPU backend), 0 = hardware concurrency */
   uint64_t lane_arena_bytes;  /* per-lane scratch (frames, stacks, memory), 0 = default 4 MiB */
   uint32_t max_rounds;        /* state-fetch rounds before giving up, 0 = default 4096 */
+  uint64_t state_cache_bytes; /* budget of the state cache kept across batches (device memory
+                                 for the GPU backend), 0 = default 512 MiB */
 } fevm_config;
 
 typedef struct {
@@ -253,6 +255,10 @@ typedef struct {
   double transfer_seconds;  /* host<->device copies (GPU backend) */
   double total_seconds;
   uint64_t cpu_retried_lanes; /* lanes that exceeded GPU arena limits and re-ran on the CPU backend */
+  uint64_t cache_account_fills; /* accounts the host supplied for this batch (misses in the cache) */
+  uint64_t cache_slot_fills;    /* storage slots the host supplied for this batch */
+  uint64_t cache_evictions;     /* LRU evictions of the engine's state cache so far */
+  uint64_t cache_bytes;         /* size of the state cache after the batch */
 } fevm_batch_stats;
 
 /* ------------------------------------------------------------------ API */
@@ -284,9 +290,27 @@ const fevm_result* fevm_batch_result(const fevm_batch* batch, uint32_t lane);
 uint32_t fevm_batch_result_status(const fevm_batch* batch, uint32_t lane);
 uint64_t fevm_batch_result_gas_left(const fevm_batch* batch, uint32_t lane);
 void fevm_batch_stats_get(const fevm_batch* batch, fevm_batch_stats* out);
-/* Clears messages and results but keeps the cached pre-state (reuse for a new batch
- * against the same state). */
+/* Clears messages and results; the engine's state cache keeps the pre-state (reuse
+ * for a new batch against the same state). */
 void fevm_batch_reset(fevm_batch* batch);
+
+/* State cache. The engine keeps code (by code hash), accounts, storage slots and
+ * block hashes across batches, resident in device memory for the GPU backend,
+ * and evicts the least recently used entries beyond fevm_config.state_cache_bytes.
+ * Code is always reused. Accounts, slots and block hashes are reused only when
+ * consecutive batches declare the same state id (any 32-byte name of the
+ * pre-state, e.g. a block hash); a batch without one, or with a different one,
+ * starts from an empty state cache. Within one id, storage `original` values are
+ * reused as given, so an id names a transaction boundary.
+ * Call before the batch's first preload or execute; returns 0, or -1 if too late. */
+int fevm_batch_set_state_id(fevm_batch* batch, const fevm_bytes32* state_id);
+/* After execute: declares that the client committed every lane's result in lane
+ * order and nothing else changed, so the cache now holds state `new_state_id`.
+ * Returns 0 when the cache followed the diffs, 1 when it had to drop accounts and
+ * slots instead (fallback lanes, created or destroyed accounts), -1 on misuse. */
+int fevm_batch_commit(fevm_batch* batch, const fevm_bytes32* new_state_id);
+/* Drops everything, including code. */
+void fevm_engine_cache_clear(fevm_engine* engine);
 void fevm_batch_destroy(fevm_batch* batch);
 
 /* ------------------------------------------------------------------ flat FFI API

@@ -95,6 +95,21 @@ impl<'e> Batch<'e> {
         Self { raw, _engine: core::marker::PhantomData }
     }
 
+    /// Names the pre-state so the engine's state cache can reuse accounts and slots fetched by an
+    /// earlier batch with the same id. Must precede the first preload or execute; returns false
+    /// when it is too late.
+    pub fn set_state_id(&mut self, id: &[u8; 32]) -> bool {
+        let id = sys::fevm_bytes32 { bytes: *id };
+        unsafe { sys::fevm_batch_set_state_id(self.raw, &id) == 0 }
+    }
+
+    /// After execute, declares that every lane's result was committed in lane order and nothing
+    /// else changed: the cache then holds state `id`. Returns the C status (0 followed, 1 flushed).
+    pub fn commit(&mut self, id: &[u8; 32]) -> i32 {
+        let id = sys::fevm_bytes32 { bytes: *id };
+        unsafe { sys::fevm_batch_commit(self.raw, &id) }
+    }
+
     /// Adds a message; returns its lane, or `None` if the engine rejected it. Input and code are
     /// copied.
     pub fn add(&mut self, msg: &sys::fevm_message) -> Option<u32> {

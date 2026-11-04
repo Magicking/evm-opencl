@@ -1,0 +1,8 @@
+{
+ "name": "keccak_loop",
+ "category": "compute",
+ "code": "6113885b801561001a57604060002060005260019003610003565b5060206000f3",
+ "input": "",
+ "gas": 30000000,
+ "source": "synthetic"
+}

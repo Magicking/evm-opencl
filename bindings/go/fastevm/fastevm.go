@@ -101,6 +101,9 @@ type Config struct {
 	CPUThreads     uint32
 	LaneArenaBytes uint64
 	MaxRounds      uint32
+	// StateCacheBytes bounds the state cache the engine keeps across batches
+	// (device memory for the GPU backend); 0 = default 512 MiB.
+	StateCacheBytes uint64
 }
 
 type BlockContext struct {
@@ -201,6 +204,10 @@ type Stats struct {
 	TransferSeconds float64
 	TotalSeconds    float64
 	CPURetriedLanes uint64 // lanes that exceeded GPU arena limits and re-ran on the CPU backend
+	AccountFills    uint64 // accounts the host supplied (state cache misses)
+	SlotFills       uint64 // storage slots the host supplied
+	CacheEvictions  uint64
+	CacheBytes      uint64
 }
 
 // Engine wraps fevm_engine. It is safe to use from multiple goroutines as long
@@ -219,6 +226,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 	c.cpu_threads = C.uint32_t(cfg.CPUThreads)
 	c.lane_arena_bytes = C.uint64_t(cfg.LaneArenaBytes)
 	c.max_rounds = C.uint32_t(cfg.MaxRounds)
+	c.state_cache_bytes = C.uint64_t(cfg.StateCacheBytes)
 	var cerr *C.char
 	e := C.fevm_engine_create(&c, &cerr)
 	if e == nil {
@@ -262,11 +270,36 @@ func (e *Engine) NewBatch(blk *BlockContext) *Batch {
 	return b
 }
 
+// Batch calls that touch the engine's state cache hold the engine lock, like Execute.
 func (b *Batch) Close() {
 	if b.b != nil {
+		b.eng.mu.Lock()
 		C.fevm_batch_destroy(b.b)
+		b.eng.mu.Unlock()
 		b.b = nil
 	}
+}
+
+// SetStateID names the batch's pre-state so the engine can reuse accounts and
+// slots cached by an earlier batch with the same id. Call before the first
+// preload or Execute; returns false when it is too late.
+func (b *Batch) SetStateID(id Word) bool {
+	var c C.fevm_bytes32
+	copyWord(&c, id)
+	b.eng.mu.Lock()
+	defer b.eng.mu.Unlock()
+	return C.fevm_batch_set_state_id(b.b, &c) == 0
+}
+
+// Commit declares, after Execute, that every lane's result was committed in
+// lane order and nothing else changed, so the cache holds state id. It returns
+// 0 when the cache followed the diffs and 1 when it dropped accounts and slots.
+func (b *Batch) Commit(id Word) int {
+	var c C.fevm_bytes32
+	copyWord(&c, id)
+	b.eng.mu.Lock()
+	defer b.eng.mu.Unlock()
+	return int(C.fevm_batch_commit(b.b, &c))
 }
 
 func copyAddr(dst *C.fevm_address, a Address) {
@@ -341,7 +374,7 @@ func (b *Batch) Summary(i int) (Status, uint64) {
 	return Status(C.fevm_batch_result_status(b.b, C.uint32_t(i))), uint64(C.fevm_batch_result_gas_left(b.b, C.uint32_t(i)))
 }
 
-// PreloadAccount seeds the batch state cache.
+// PreloadAccount seeds the engine's state cache for this batch.
 func (b *Batch) PreloadAccount(addr Address, info *AccountInfo) {
 	var ca C.fevm_address
 	copyAddr(&ca, addr)
@@ -350,7 +383,9 @@ func (b *Batch) PreloadAccount(addr Address, info *AccountInfo) {
 	if len(info.Code) > 0 {
 		code = (*C.uint8_t)(unsafe.Pointer(&info.Code[0]))
 	}
+	b.eng.mu.Lock()
 	C.fevm_batch_preload_account(b.b, &ca, &ci, code, C.uint64_t(len(info.Code)))
+	b.eng.mu.Unlock()
 }
 
 func (b *Batch) PreloadStorage(addr Address, key, value Word) {
@@ -359,7 +394,9 @@ func (b *Batch) PreloadStorage(addr Address, key, value Word) {
 	copyAddr(&ca, addr)
 	copyWord(&ck, key)
 	copyWord(&cv, value)
+	b.eng.mu.Lock()
 	C.fevm_batch_preload_storage(b.b, &ca, &ck, &cv)
+	b.eng.mu.Unlock()
 }
 
 func toCInfo(info *AccountInfo) C.fevm_account_info {
@@ -405,6 +442,10 @@ func (b *Batch) Stats() Stats {
 		TransferSeconds: float64(s.transfer_seconds),
 		TotalSeconds:    float64(s.total_seconds),
 		CPURetriedLanes: uint64(s.cpu_retried_lanes),
+		AccountFills:    uint64(s.cache_account_fills),
+		SlotFills:       uint64(s.cache_slot_fills),
+		CacheEvictions:  uint64(s.cache_evictions),
+		CacheBytes:      uint64(s.cache_bytes),
 	}
 }
 

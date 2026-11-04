@@ -142,7 +142,9 @@ struct Interp {
   }
 
   FEVM_HD uint8_t* ptr(Loc l) const {
-    return (l & LOC_ARENA) ? arena + (l & ~LOC_ARENA) : (uint8_t*)base->blob + l;
+    if (l & LOC_ARENA) return arena + (l & ~LOC_ARENA);
+    if (l & LOC_CODE) return (uint8_t*)base->code + (l & ~LOC_CODE);
+    return (uint8_t*)base->blob + l;
   }
   FEVM_HD Frame* frame(uint32_t d) const { return frames + d; }
   FEVM_HD StackView stack_of(const Frame* f) const { return StackView{stk + f->stack_base * stk_stride, stk_stride}; }
@@ -192,6 +194,9 @@ struct Interp {
     Acc* e = *out;
     if (!e->loaded) {
       const BaseAccount* b = base->find_account(a);
+      // With host warm flags, an entry cached by an earlier batch carries no
+      // access-list status for this lane: ask the host again.
+      if (b && msg->use_host_warm && b->warm_seq != base->seq) b = nullptr;
       if (!b) {
         ctl->req_kind = REQ_ACCOUNT;
         ctl->req_addr = a;
@@ -248,6 +253,7 @@ struct Interp {
     Slot* e = *out;
     if (!e->loaded) {
       const BaseSlot* b = base->find_slot(a, k);
+      if (b && msg->use_host_warm && b->warm_seq != base->seq) b = nullptr;
       if (!b && !msg->use_host_warm && account_storage_empty(a)) {
         // Account known to have no storage at message start: every unwritten slot is zero.
         // (Not with host warm flags: the host must be asked for the slot's access-list status.)

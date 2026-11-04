@@ -24,12 +24,14 @@ client's own EVM.
                                    fastevm.h C ABI
                             |
      libfastevm.so  host runtime (C++20)
-       batch + base-state cache, round loop (suspend/resume on state misses),
-       host callbacks, result packing, CPU backend (threads)
+       engine state cache (code, accounts, slots; LRU; kept across batches),
+       round loop (suspend/resume on state misses), host callbacks, result
+       packing, CPU backend (threads)
                             |
      CUDA backend (sm_89)   same interpreter source (__host__ __device__)
        1 thread = 1 message, interleaved (coalesced) operand stacks,
-       per-lane arenas, device precompiles (sha256/ripemd/identity/blake2f)
+       per-lane arenas, device-resident state cache (delta uploads),
+       two overlapping lane groups, device precompiles (sha256/ripemd/identity/blake2f)
 ```
 
 ## Status
@@ -39,6 +41,7 @@ client's own EVM.
 | Interpreter (all Cancun/Prague/Osaka opcodes, nested calls, CREATE/CREATE2, EIP-7702 delegation, transient storage, EIP-6780) | done, shared host/device source |
 | CPU backend (thread pool) | done |
 | CUDA backend | done; lanes that exceed GPU arena limits transparently re-run on CPU |
+| State cache across batches (GPU-resident, LRU, state ids, commit-through) | done; measurements and remaining bottlenecks in [`docs/perf.md`](docs/perf.md) |
 | Precompiles | sha256, ripemd160, identity, blake2f in-lane; ecrecover, modexp, bn254, KZG, BLS12-381, P256 via host callback (bit-exact with the client) |
 | reth integration (Rust binding `bindings/rust/fastevm`, evm2 `InterpreterRunner`, frame mode, `integrations/reth.patch`) | done |
 | geth integration (`vm.ExternalEngine`, cgo binding, geth test hook) | done |
@@ -84,6 +87,12 @@ Results are per-lane state diffs (balances, nonces, code, storage, created /
 self-destructed / touched accounts), logs, output, gas left and refund delta.
 A flat, primitive-argument variant (`*_flat`) exists for JNA/FFM/ctypes.
 
+The engine keeps a state cache across batches (in device memory for the GPU
+backend): code by code hash always; accounts, slots and block hashes while
+batches declare the same `fevm_batch_set_state_id`; `fevm_batch_commit` folds a
+batch's committed diffs in so the next state stays warm. Least recently used
+entries are evicted beyond `fevm_config.state_cache_bytes`. ABI version 2.
+
 ## Client integration
 
 ### go-ethereum
@@ -126,25 +135,26 @@ fastevm-CPU and fastevm-GPU; `bench/report.py` renders the results.
 
 ### Results (Ryzen 9 7940HS 16 threads, RTX 4060 Ti on PCIe Gen3 x4; full tables in `bench/report.md`)
 
-Reference = reth+JIT. Batch of N independent messages, messages/s (CPU engines: 16 threads):
+Reference = reth+JIT. Batch of N independent messages, messages/s (CPU engines: 16 threads).
+GPU warm = repeats declare one state id, so accounts and slots come from the GPU state cache:
 
-| program | N | reth+JIT | reth | geth | fastevm CPU | fastevm GPU | GPU vs reference |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| keccak_loop | 10,000 | 7.0k | 6.4k | 8.8k | 4.8k | 28.0k | **4.0×** |
-| arith_loop (256-bit math) | 10,000 | 209k | 11.7k | 5.0k | 6.6k | 21.7k | 0.10× |
-| blake2b_shifts | 1,000 | 4.9k | 1.5k | 218 | 939 | 778 | 0.16× |
-| weierstrudel | 1,000 | 108k | 80k | 50k | 56.8k | 61.7k | 0.57× |
-| snailtracer | 1,000 | 822 | 378 | 104 | 310 | 104 | 0.13× |
-| erc20_transfer | 10,000 | 4.50M | 4.22M | 1.00M | 854k | 435k | 0.10× |
-| storage_rw | 10,000 | 1.09M | 740k | 87k | 107k | 58k | 0.05× |
+| program | N | reth+JIT | reth | geth | fastevm CPU | fastevm GPU | GPU warm | GPU (warm) vs reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| keccak_loop | 10,000 | 7.0k | 6.4k | 8.8k | 4.9k | 28.0k | 34.1k | **4.0× (4.8×)** |
+| arith_loop (256-bit math) | 10,000 | 209k | 11.7k | 5.0k | 6.9k | 23.4k | 26.5k | 0.11× (0.13×) |
+| blake2b_shifts | 1,000 | 4.9k | 1.5k | 218 | 978 | 780 | 779 | 0.16× |
+| weierstrudel | 1,000 | 108k | 80k | 50k | 58.8k | 74.1k | 77.8k | 0.69× (0.72×) |
+| snailtracer | 1,000 | 822 | 378 | 104 | 318 | 104 | 104 | 0.13× |
+| erc20_transfer | 10,000 | 4.50M | 4.22M | 1.00M | 842k | 973k | 1.21M | 0.22× (0.27×) |
+| storage_rw | 10,000 | 1.09M | 740k | 87k | 91k | 86k | 90k | 0.08× |
 
 Block import (workload C: reth `re-execute`, 40 blocks × 60M gas, receipts validated):
 
 | chain | reth | reth+JIT | fastevm CPU | fastevm GPU |
 |---|---:|---:|---:|---:|
-| ERC20 transfers | 5.74 Ggas/s | 5.40 | 2.45 | 0.03 |
-| ERC20, 50 % to one hot recipient | 5.88 | 5.67 | 2.25 | 0.02 |
-| transfers + arith/keccak loops | 2.17 | 6.14 | 0.61 | 0.01 |
+| ERC20 transfers | 5.74 Ggas/s | 5.40 | 4.34 | 0.17 |
+| ERC20, 50 % to one hot recipient | 5.88 | 5.67 | 4.21 | 0.15 |
+| transfers + arith/keccak loops | 2.17 | 6.14 | 0.61 | 0.02 |
 
 * Against the fastest client the GPU wins only where evm2's JIT cannot help: keccak-bound code
   (4× reth+JIT at N = 10k). evm2's JIT turns 256-bit arithmetic loops into native code
@@ -152,9 +162,12 @@ Block import (workload C: reth `re-execute`, 40 blocks × 60M gas, receipts vali
 * Block import through the per-message hook is overhead only (one message per GPU launch, a batch
   plus host callbacks per transaction on CPU). A gain needs the BLOCK-mode scheduler (whole block per
   batch), which is designed (`docs/integration.md`) but not implemented.
+* The GPU state cache (v3) cut a single erc20 message on the GPU from 1.32 ms to 0.23 ms (0.14 ms
+  warm) and doubled erc20 batch throughput; erc20 still loses to reth+JIT, bounded by result
+  traffic over the Gen3 ×4 link (see [`docs/perf.md`](docs/perf.md)).
 * Single messages: the GPU is 20-100× slower than a CPU interpreter; fastevm CPU is 1-3× slower
   than reth's interpreter and slower still than its JIT.
-* reth ef-tests: native 46.4 s, fastevm CPU 47.3 s, fastevm GPU 436 s.
+* reth ef-tests: native 46.4 s, fastevm CPU 47.5 s, fastevm GPU 133 s (436 s before the state cache).
 
 ## Design notes
 

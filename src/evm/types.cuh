@@ -90,12 +90,19 @@ FEVM_HD uint32_t addr_low_index(const Address& a) {
 
 // ------------------------------------------------------------------ locations
 
-// Bit 63 set: offset inside the lane arena. Otherwise: offset in the batch blob pool.
+// Bit 63 set: offset inside the lane arena. Bit 62 set: offset in the engine's
+// code cache (persists across batches). Otherwise: offset in the batch blob pool.
 typedef uint64_t Loc;
 constexpr Loc LOC_ARENA = 1ull << 63;
+constexpr Loc LOC_CODE = 1ull << 62;
 constexpr Loc LOC_NONE = ~0ull;
 
 // ------------------------------------------------------------------ base state
+//
+// The base tables belong to the engine's state cache and stay resident (on the
+// device for the GPU backend) across batches. An entry is live only while its
+// epoch equals the cache epoch; flushing the cache bumps the epoch, so stale
+// entries read as empty slots and need no clearing or upload.
 
 struct BaseAccount {
   Address addr;
@@ -110,6 +117,8 @@ struct BaseAccount {
   uint8_t code_hash[32];
   Loc code_loc;
   Loc jd_loc;  // jumpdest bitmap
+  uint32_t epoch;
+  uint32_t warm_seq;  // batch in which warm_lane was reported
 };
 
 struct BaseSlot {
@@ -117,17 +126,30 @@ struct BaseSlot {
   uint8_t used;
   uint8_t _pad[3];
   uint32_t warm_lane;
-  uint32_t _pad2;
+  uint32_t epoch;
   u256 key;
   u256 value;
   u256 original;
+  uint32_t warm_seq;
+  uint32_t _pad2;
 };
 
 struct BaseBlockHash {
   uint64_t number;
-  uint64_t used;
+  uint32_t used;
+  uint32_t epoch;
   uint8_t hash[32];
 };
+
+// Records the batch that last used a cache entry (LRU eviction). Every writer
+// stores the same value, so the race between lanes is benign.
+FEVM_HD void lru_touch(uint32_t* p, uint32_t v) {
+#if FEVM_ON_DEVICE
+  if (*p != v) *p = v;
+#else
+  if (__atomic_load_n(p, __ATOMIC_RELAXED) != v) __atomic_store_n(p, v, __ATOMIC_RELAXED);
+#endif
+}
 
 struct BaseView {
   const BaseAccount* accounts;
@@ -136,14 +158,22 @@ struct BaseView {
   uint64_t slot_mask;
   const BaseBlockHash* bh;
   uint64_t bh_mask;
-  const uint8_t* blob;
+  const uint8_t* blob;  // batch blob (calldata, access lists, precompile outputs)
+  const uint8_t* code;  // code cache (LOC_CODE)
+  uint32_t* acc_lru;
+  uint32_t* slot_lru;
+  uint32_t epoch;
+  uint32_t seq;  // current batch
 
   FEVM_HD const BaseAccount* find_account(const Address& a) const {
     uint64_t i = addr_hash(a) & acc_mask;
     for (;;) {
       const BaseAccount* e = &accounts[i];
-      if (!e->used) return nullptr;
-      if (addr_eq(e->addr, a)) return e;
+      if (!e->used || e->epoch != epoch) return nullptr;
+      if (addr_eq(e->addr, a)) {
+        lru_touch(&acc_lru[i], seq);
+        return e;
+      }
       i = (i + 1) & acc_mask;
     }
   }
@@ -151,8 +181,11 @@ struct BaseView {
     uint64_t i = slot_hash(a, k) & slot_mask;
     for (;;) {
       const BaseSlot* e = &slots[i];
-      if (!e->used) return nullptr;
-      if (e->key == k && addr_eq(e->addr, a)) return e;
+      if (!e->used || e->epoch != epoch) return nullptr;
+      if (e->key == k && addr_eq(e->addr, a)) {
+        lru_touch(&slot_lru[i], seq);
+        return e;
+      }
       i = (i + 1) & slot_mask;
     }
   }
@@ -160,7 +193,7 @@ struct BaseView {
     uint64_t i = mix64(n) & bh_mask;
     for (;;) {
       const BaseBlockHash* e = &bh[i];
-      if (!e->used) return nullptr;
+      if (!e->used || e->epoch != epoch) return nullptr;
       if (e->number == n) return e;
       i = (i + 1) & bh_mask;
     }
@@ -242,6 +275,84 @@ struct LaneCtl {
   uint32_t _pad2;
   uint64_t steps;
 };
+
+// What the host needs from a lane after a round: the request of a suspended
+// lane or the outcome of a finished one. The GPU backend downloads these instead
+// of whole LaneCtl records.
+struct CtlEvent {
+  uint32_t status;
+  uint32_t req_kind;
+  union {
+    struct {
+      Address addr;
+      uint32_t depth;
+      uint64_t key[4];  // u256 words
+      uint64_t number;
+      Loc input_loc;
+      uint64_t input_len;
+      uint64_t gas;
+      uint32_t pc;
+    } req;
+    struct {
+      uint32_t status;
+      uint32_t error;
+      uint64_t gas_left;
+      int64_t refund;
+      Loc out_loc;
+      uint64_t out_len;
+      Address created;
+      uint64_t steps;
+    } res;
+  };
+};
+
+FEVM_HD void ctl_to_event(const LaneCtl& c, CtlEvent* e) {
+  e->status = c.status;
+  e->req_kind = c.req_kind;
+  if (c.status == LANE_SUSPENDED) {
+    e->req.addr = c.req_addr;
+    e->req.depth = c.req_depth;
+    for (int i = 0; i < 4; i++) e->req.key[i] = c.req_key.w[i];
+    e->req.number = c.req_number;
+    e->req.input_loc = c.req_input_loc;
+    e->req.input_len = c.req_input_len;
+    e->req.gas = c.req_gas;
+    e->req.pc = c.req_pc;
+  } else {
+    e->res.status = c.result_status;
+    e->res.error = c.result_error;
+    e->res.gas_left = c.gas_left;
+    e->res.refund = c.refund;
+    e->res.out_loc = c.out_loc;
+    e->res.out_len = c.out_len;
+    e->res.created = c.created;
+    e->res.steps = c.steps;
+  }
+}
+
+FEVM_HD void event_to_ctl(const CtlEvent& e, LaneCtl* c) {
+  c->status = e.status;
+  c->req_kind = e.req_kind;
+  if (e.status == LANE_SUSPENDED) {
+    c->req_addr = e.req.addr;
+    c->req_depth = e.req.depth;
+    for (int i = 0; i < 4; i++) c->req_key.w[i] = e.req.key[i];
+    c->req_number = e.req.number;
+    c->req_input_loc = e.req.input_loc;
+    c->req_input_len = e.req.input_len;
+    c->req_gas = e.req.gas;
+    c->req_pc = e.req.pc;
+  } else {
+    c->result_status = e.res.status;
+    c->result_error = e.res.error;
+    c->gas_left = e.res.gas_left;
+    c->refund = e.res.refund;
+    c->out_loc = e.res.out_loc;
+    c->out_len = e.res.out_len;
+    c->created = e.res.created;
+    c->steps = e.res.steps;
+  }
+}
 
 // ------------------------------------------------------------------ lane arena structures
 

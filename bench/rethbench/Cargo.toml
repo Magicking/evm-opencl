@@ -1,0 +1,31 @@
+[package]
+name = "rethbench"
+version = "0.1.0"
+edition = "2024"
+description = "Batch throughput of N independent EVM messages on reth's EVM (evm2, interpreter or JIT)"
+publish = false
+
+# Standalone: not a member of any parent workspace.
+[workspace]
+
+[dependencies]
+# Same evm2 revision and features as ../../../reth (Cargo.toml `evm2*` + reth-evm-ethereum `asm-keccak`/`jit`).
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", features = ["asm-keccak"] }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", features = ["llvm", "asm-keccak"] }
+alloy-consensus = { version = "2", default-features = false, features = ["std"] }
+alloy-primitives = { version = "1.5", features = ["asm-keccak", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+tikv-jemallocator = "0.6"
+
+[patch."https://github.com/alloy-rs/evm2"]
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
+
+[patch.crates-io]
+inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

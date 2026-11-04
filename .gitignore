@@ -1,3 +1,39 @@
-.cache
-build/
-bench/
+# CMake / local build trees
+/build*/
+/cmake-build-*/
+/compile_commands.json
+
+# Local caches: JDK, spec-test fixtures, clangd index
+/.cache/
+
+# Rust (bindings/rust/fastevm, bench/rethbench) — keep Cargo.lock
+target/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Java (bench/besu/BesuBatch.class built by javac)
+*.class
+
+# Profiling / logs
+*.log
+*.nsys-rep
+*.ncu-rep
+*.qdrep
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Ad-hoc timestamped bench runs; keep curated results
+bench/results/*.json
+!bench/results/full.json
+!bench/results/full_v2.json
+!bench/results/full_v3.json
+!bench/results/compliance.json
+!bench/results/reference.json
+!bench/results/rerun_arena.json

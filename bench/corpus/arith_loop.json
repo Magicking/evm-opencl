@@ -1,0 +1,8 @@
+{
+ "name": "arith_loop",
+ "category": "compute",
+ "code": "6000614e205b80156100325790671f2e3d4c5b6a798802670123456789abcdef0163deadbeef1881019060019003610005565b5060005260206000f3",
+ "input": "",
+ "gas": 30000000,
+ "source": "synthetic"
+}

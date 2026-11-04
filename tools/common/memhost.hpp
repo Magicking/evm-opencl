@@ -56,6 +56,7 @@ struct World {
   std::map<uint64_t, Hash32> block_hashes;
   PrecompileFn precompile = nullptr;
   uint64_t fetches = 0;
+  bool warm_all = false;  // report every account and slot as already warm (host warm flags)
 
   Account& at(const Addr& a) { return accounts[a]; }
 
@@ -69,6 +70,7 @@ struct World {
       switch (r.kind) {
         case FEVM_REQ_ACCOUNT: {
           fevm_account_info info{};
+          info.warm = w->warm_all;
           auto it = w->accounts.find(a);
           if (it == w->accounts.end()) {
             fevm_sink_account(sink, i, &info, nullptr, 0);
@@ -92,7 +94,7 @@ struct World {
             auto s = it->second.storage.find(k);
             if (s != it->second.storage.end()) memcpy(v.bytes, s->second.b, 32);
           }
-          fevm_sink_storage(sink, i, &v, &v, 0);
+          fevm_sink_storage(sink, i, &v, &v, w->warm_all);
           break;
         }
         case FEVM_REQ_BLOCKHASH: {

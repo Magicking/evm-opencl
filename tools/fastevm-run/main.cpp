@@ -5,6 +5,12 @@
 //
 // With --batch N, N independent messages (distinct senders, same contract) run
 // in one batch; --repeat repeats the whole batch and reports the best/median time.
+//
+// State cache: by default every repeat starts cold (code stays cached). --warm
+// declares the same state id for every repeat, so repeats after the first find
+// accounts and slots in the engine's cache, as on a node serving calls against
+// one block. --chain commits each repeat's results (to the in-memory world and
+// the cache) and runs the next repeat on the new state.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -32,7 +38,8 @@ static std::vector<uint8_t> parse_hex(std::string h) {
 static void usage() {
   fprintf(stderr,
           "usage: fastevm-run (--code HEX | --codefile FILE) [--input HEX] [--gas N] [--batch N] [--repeat R]\n"
-          "                   [--backend cpu|gpu] [--fork cancun|prague|osaka] [--threads N] [--arena BYTES] [--json]\n");
+          "                   [--backend cpu|gpu] [--fork cancun|prague|osaka] [--threads N] [--arena BYTES]\n"
+          "                   [--warm | --chain] [--json]\n");
   exit(2);
 }
 
@@ -41,7 +48,7 @@ int main(int argc, char** argv) {
   uint64_t gas = 30000000;
   uint32_t batch = 1, repeat = 1, threads = 0;
   uint64_t arena = 0;
-  bool json = false;
+  bool json = false, warm = false, chain = false;
   fevm_backend backend = FEVM_BACKEND_CPU;
   fevm_fork fork = FEVM_FORK_OSAKA;
   for (int i = 1; i < argc; i++) {
@@ -77,6 +84,10 @@ int main(int argc, char** argv) {
       fork = f == "cancun" ? FEVM_FORK_CANCUN : f == "prague" ? FEVM_FORK_PRAGUE : FEVM_FORK_OSAKA;
     } else if (a == "--json")
       json = true;
+    else if (a == "--warm")
+      warm = true;
+    else if (a == "--chain")
+      chain = true;
     else
       usage();
   }
@@ -109,6 +120,10 @@ int main(int argc, char** argv) {
   fevm_batch_stats stats{};
   for (uint32_t r = 0; r < repeat; r++) {
     fevm_batch* b = fevm_batch_create(eng, &blk);
+    fevm_bytes32 sid{};
+    sid.bytes[31] = 1;
+    if (chain) memcpy(sid.bytes, &r, 4);
+    if (warm || chain) fevm_batch_set_state_id(b, &sid);
     for (uint32_t i = 0; i < batch; i++) {
       fevm_message m{};
       Addr s = addr_from_u64(0x100000 + i);
@@ -137,6 +152,14 @@ int main(int argc, char** argv) {
     last = *res;
     out.assign(res->output, res->output + res->output_len);
     fevm_batch_stats_get(b, &stats);
+    if (chain) {
+      for (uint32_t i = 0; i < batch; i++) w.apply(*fevm_batch_result(b, i));
+      fevm_bytes32 nid{};
+      nid.bytes[31] = 1;
+      uint32_t r1 = r + 1;
+      memcpy(nid.bytes, &r1, 4);
+      fevm_batch_commit(b, &nid);
+    }
     fevm_batch_destroy(b);
   }
   std::vector<double> sorted = times;
@@ -152,11 +175,14 @@ int main(int argc, char** argv) {
     printf(
         "{\"backend\":\"%s\",\"batch\":%u,\"repeat\":%u,\"status\":%u,\"error\":%u,\"gas_used\":%llu,"
         "\"steps\":%llu,\"best_s\":%.9f,\"median_s\":%.9f,\"msgs_per_s\":%.1f,\"mgas_per_s\":%.3f,"
-        "\"rounds\":%u,\"cpu_retried\":%llu,\"exec_s\":%.6f,\"transfer_s\":%.6f,\"output\":\"%s\"}\n",
+        "\"rounds\":%u,\"cpu_retried\":%llu,\"exec_s\":%.6f,\"transfer_s\":%.6f,\"first_s\":%.9f,"
+        "\"cache\":\"%s\",\"account_fills\":%llu,\"slot_fills\":%llu,\"cache_bytes\":%llu,\"output\":\"%s\"}\n",
         backend == FEVM_BACKEND_GPU ? "gpu" : "cpu", batch, repeat, last.status, last.error,
         (unsigned long long)gas_used_total, (unsigned long long)steps_total, best, median, batch / median,
         gas_used_total / median / 1e6, stats.rounds, (unsigned long long)stats.cpu_retried_lanes, stats.exec_seconds,
-        stats.transfer_seconds, outhex.c_str());
+        stats.transfer_seconds, times.front(), chain ? "chain" : warm ? "warm" : "cold",
+        (unsigned long long)stats.cache_account_fills, (unsigned long long)stats.cache_slot_fills,
+        (unsigned long long)stats.cache_bytes, outhex.c_str());
   } else {
     printf("status=%u error=%u gas_used(total)=%llu steps(total)=%llu\n", last.status, last.error,
            (unsigned long long)gas_used_total, (unsigned long long)steps_total);

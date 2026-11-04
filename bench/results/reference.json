@@ -1,0 +1,12 @@
+{
+ "reference": "reth_jit",
+ "client": "reth",
+ "geomean_vs_geth": {
+  "reth": 2.347705379516137,
+  "reth_jit": 9.691730752956616,
+  "geth": 1.0,
+  "besu": 0.2534339695977275
+ },
+ "rows": 62,
+ "rule": "geomean over workloads A (1/latency) and B (msgs/s), relative to geth"
+}

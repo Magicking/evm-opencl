@@ -4,7 +4,7 @@
 
 use core::ffi::{c_char, c_int, c_void};
 
-pub const FEVM_ABI_VERSION: u32 = 1;
+pub const FEVM_ABI_VERSION: u32 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -33,6 +33,7 @@ pub struct fevm_config {
     pub cpu_threads: u32,
     pub lane_arena_bytes: u64,
     pub max_rounds: u32,
+    pub state_cache_bytes: u64,
 }
 
 #[repr(C)]
@@ -228,6 +229,10 @@ pub struct fevm_batch_stats {
     pub transfer_seconds: f64,
     pub total_seconds: f64,
     pub cpu_retried_lanes: u64,
+    pub cache_account_fills: u64,
+    pub cache_slot_fills: u64,
+    pub cache_evictions: u64,
+    pub cache_bytes: u64,
 }
 
 #[repr(C)]
@@ -264,6 +269,9 @@ unsafe extern "C" {
     pub fn fevm_batch_result(batch: *const fevm_batch, lane: u32) -> *const fevm_result;
     pub fn fevm_batch_stats_get(batch: *const fevm_batch, out: *mut fevm_batch_stats);
     pub fn fevm_batch_reset(batch: *mut fevm_batch);
+    pub fn fevm_batch_set_state_id(batch: *mut fevm_batch, state_id: *const fevm_bytes32) -> c_int;
+    pub fn fevm_batch_commit(batch: *mut fevm_batch, new_state_id: *const fevm_bytes32) -> c_int;
+    pub fn fevm_engine_cache_clear(engine: *mut fevm_engine);
     pub fn fevm_batch_destroy(batch: *mut fevm_batch);
 
     pub fn fevm_sink_account(
@@ -303,7 +311,7 @@ mod tests {
     #[test]
     fn layouts_match_header() {
         // sizeof() from include/fastevm.h on x86_64 (gcc).
-        assert_eq!(core::mem::size_of::<fevm_config>(), 32);
+        assert_eq!(core::mem::size_of::<fevm_config>(), 40);
         assert_eq!(core::mem::size_of::<fevm_block_ctx>(), 184);
         assert_eq!(core::mem::size_of::<fevm_message>(), 224);
         assert_eq!(core::mem::size_of::<fevm_request>(), 96);
@@ -311,6 +319,6 @@ mod tests {
         assert_eq!(core::mem::size_of::<fevm_result>(), 112);
         assert_eq!(core::mem::size_of::<fevm_account_diff>(), 112);
         assert_eq!(core::mem::size_of::<fevm_log>(), 168);
-        assert_eq!(core::mem::size_of::<fevm_batch_stats>(), 56);
+        assert_eq!(core::mem::size_of::<fevm_batch_stats>(), 88);
     }
 }

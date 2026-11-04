@@ -1,0 +1,112 @@
+[
+{
+"suite": "reth ef-tests (ethereum/tests v17 + EEST v4.5.0, 60 groups)",
+"client": "reth",
+"backend": "CPU",
+"tests": 60,
+"failures": 0,
+"on_engine": 102225,
+"fallbacks": 74,
+"baseline_failures": 0,
+"run": "reth CPU 0"
+},
+{
+"suite": "reth ef-tests (ethereum/tests v17 + EEST v4.5.0, 60 groups)",
+"client": "reth",
+"backend": "GPU",
+"tests": 60,
+"failures": 0,
+"on_engine": 102225,
+"fallbacks": 74,
+"baseline_failures": 0,
+"run": "reth GPU 1"
+},
+{
+"suite": "reth blockchain tests, tests@v21.0.1 Cancun-Osaka (ef-test-runner)",
+"client": "reth",
+"backend": "CPU",
+"tests": 7290,
+"failures": 2,
+"baseline_failures": 2,
+"on_engine": 209629,
+"fallbacks": 67,
+"run": "reth CPU 2"
+},
+{
+"suite": "reth blockchain tests, tests@v21.0.1 Cancun-Osaka (ef-test-runner)",
+"client": "reth",
+"backend": "GPU",
+"tests": 7290,
+"failures": 2,
+"baseline_failures": 2,
+"on_engine": 209629,
+"fallbacks": 67,
+"run": "reth GPU 3"
+},
+{
+"suite": "geth TestExecutionSpecState (all forks, 4 permutations)",
+"client": "geth",
+"backend": "CPU",
+"tests": 421173,
+"failures": 0,
+"on_engine": 152836,
+"fallbacks": 264,
+"baseline_failures": 0,
+"run": "geth CPU 4"
+},
+{
+"suite": "geth TestExecutionSpecState (Cancun-Osaka)",
+"client": "geth",
+"backend": "CPU",
+"tests": 83149,
+"failures": 0,
+"on_engine": 38209,
+"fallbacks": 66,
+"baseline_failures": 0,
+"run": "geth CPU 5"
+},
+{
+"suite": "geth TestExecutionSpecState (Cancun-Osaka)",
+"client": "geth",
+"backend": "GPU",
+"tests": 83149,
+"failures": 0,
+"on_engine": 38209,
+"fallbacks": 66,
+"baseline_failures": 0,
+"run": "geth GPU 6"
+},
+{
+"suite": "geth TestExecutionSpecBlocktests (Cancun-Osaka + transitions)",
+"client": "geth",
+"backend": "CPU",
+"tests": 50067,
+"failures": 0,
+"on_engine": 582575,
+"fallbacks": 706,
+"baseline_failures": 0,
+"run": "geth CPU 7"
+},
+{
+"suite": "besu ExecutionSpecStateTest (all forks)",
+"client": "besu",
+"backend": "CPU",
+"tests": 83367,
+"failures": 0,
+"on_engine": 38209,
+"fallbacks": 66,
+"baseline_failures": 0,
+"run": "besu CPU 8"
+},
+{
+"suite": "besu ExecutionSpecStateTest (all forks)",
+"client": "besu",
+"backend": "GPU",
+"tests": 83367,
+"failures": 0,
+"on_engine": 38209,
+"fallbacks": 66,
+"baseline_failures": 0,
+"run": "besu GPU 9"
+}
+]
