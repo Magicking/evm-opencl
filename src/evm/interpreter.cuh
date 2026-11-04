@@ -59,35 +59,38 @@ FEVM_HD uint64_t pool_alloc(ResultPool* p, uint64_t n) {
   return off;
 }
 
-// Packed result layout (little-endian, 8-byte aligned records).
-struct PackHdr {
-  uint32_t n_acc;
-  uint32_t n_slot;
-  uint32_t n_log;
-  uint32_t _pad;
-  uint64_t out_len;
-  uint64_t total;
-};
-struct PackAcc {
-  Address addr;
-  uint32_t flags;
-  uint64_t nonce;
-  uint8_t balance[32];
-  uint8_t code_hash[32];
-  uint64_t code_len;  // code bytes follow (padded to 8) when FEVM_ACC_CODE
-};
-struct PackSlot {
-  Address addr;
-  uint32_t _pad;
-  uint8_t key[32];
-  uint8_t value[32];
-};
-struct PackLog {
-  Address addr;
-  uint32_t n_topics;
-  uint8_t topics[4][32];
-  uint64_t data_len;  // data follows (padded to 8)
-};
+// Packed result record. Results cross the PCIe link, so the record is byte
+// oriented and leaves out what the host can rebuild:
+//   u32 total | varint n_acc, n_slot, n_log, out_len
+//   account: addr[20] varint flags [varint nonce: NONCE] [word balance: BALANCE]
+//            [code_hash[32] varint code_len code: CODE]
+//   slot:    u8 same_addr [addr[20] unless same_addr] word key word value
+//   log:     addr[20] u8 n_topics word topic * n_topics varint data_len data
+//   output
+// A word is a u256 without its leading zero bytes: a length byte, then that many
+// big-endian bytes. same_addr = 1: the slot belongs to the previous slot's address.
+// Account fields the flags leave out are unchanged, and the host fills them in
+// from the state cache the lane read them from.
+FEVM_HD uint32_t varint_len(uint64_t v) {
+  uint32_t n = 1;
+  for (; v >= 0x80; v >>= 7) n++;
+  return n;
+}
+FEVM_HD uint8_t* put_varint(uint8_t* w, uint64_t v) {
+  for (; v >= 0x80; v >>= 7) *w++ = (uint8_t)(v | 0x80);
+  *w++ = (uint8_t)v;
+  return w;
+}
+FEVM_HD uint32_t word_len(const u256& v) { return 1 + v.byte_len(); }
+FEVM_HD uint8_t* put_word(uint8_t* w, const u256& v) {
+  uint32_t n = v.byte_len();
+  *w++ = (uint8_t)n;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t b = n - 1 - i;
+    w[i] = (uint8_t)(v.w[b / 8] >> ((b % 8) * 8));
+  }
+  return w + n;
+}
 
 FEVM_HD uint64_t pad8(uint64_t x) { return (x + 7) & ~7ull; }
 
@@ -571,8 +574,15 @@ struct Interp {
   }
 
   // Writes the state diff, logs and output to the shared result pool.
+  // A slot is reported when its value differs from the state cache (absent = zero).
+  FEVM_HD bool slot_changed(const Slot* e) const {
+    if (!e->loaded) return false;
+    const BaseSlot* b = base->find_slot(e->addr, e->key);
+    return b ? !(b->value == e->value) : !e->value.is_zero();
+  }
+
   FEVM_HD void pack(const uint8_t* out, uint64_t out_len) {
-    uint64_t total = sizeof(PackHdr);
+    uint64_t total = 4;
     uint32_t na = 0, ns = 0;
     bool ok_status = ctl->result_status == FEVM_STATUS_SUCCESS;
     for (uint32_t li = 0; li < hdr->n_acc; li++) {
@@ -581,81 +591,77 @@ struct Interp {
       uint32_t fl = acc_flags(e);
       if (!fl) continue;
       na++;
-      total += sizeof(PackAcc);
-      if (fl & FEVM_ACC_CODE) total += pad8(e->code_len);
+      total += 20 + varint_len(fl);
+      if (fl & FEVM_ACC_NONCE) total += varint_len(e->nonce);
+      if (fl & FEVM_ACC_BALANCE) total += word_len(e->balance);
+      if (fl & FEVM_ACC_CODE) total += 32 + varint_len(e->code_len) + e->code_len;
     }
+    const Address* prev = nullptr;
     for (uint32_t li = 0; li < hdr->n_slot; li++) {
       const Slot* e = &slots[slot_list[li]];
-      if (!e->loaded) continue;
-      const BaseSlot* b = base->find_slot(e->addr, e->key);
-      if (b && b->value == e->value) continue;
-      if (!b && e->value.is_zero()) continue;
+      if (!slot_changed(e)) continue;
       ns++;
+      total += 1 + word_len(e->key) + word_len(e->value);
+      if (!prev || !addr_eq(*prev, e->addr)) total += 20;
+      prev = &e->addr;
     }
-    total += (uint64_t)ns * sizeof(PackSlot);
     uint32_t nl = ok_status ? hdr->n_logs : 0;
-    for (uint32_t i = 0; i < nl; i++) total += sizeof(PackLog) + pad8(logs[i].data_len);
-    total += pad8(out_len);
+    for (uint32_t i = 0; i < nl; i++) {
+      const LogRec* r = &logs[i];
+      total += 21 + varint_len(r->data_len) + r->data_len;
+      for (uint32_t t = 0; t < r->n_topics; t++) total += word_len(r->topics[t]);
+    }
+    total += varint_len(na) + varint_len(ns) + varint_len(nl) + varint_len(out_len) + out_len;
     uint64_t off = pool_alloc(pool, total);
     if (off == ~0ull) {
       fallback(FEVM_ERR_RESOURCES);
       return;
     }
     uint8_t* w = pool->data + off;
-    PackHdr* ph = (PackHdr*)w;
-    ph->n_acc = na;
-    ph->n_slot = ns;
-    ph->n_log = nl;
-    ph->_pad = 0;
-    ph->out_len = out_len;
-    ph->total = total;
-    w += sizeof(PackHdr);
+    for (uint32_t i = 0; i < 4; i++) *w++ = (uint8_t)(total >> (8 * i));
+    w = put_varint(w, na);
+    w = put_varint(w, ns);
+    w = put_varint(w, nl);
+    w = put_varint(w, out_len);
     for (uint32_t li = 0; li < hdr->n_acc; li++) {
       const Acc* e = &accs[acc_list[li]];
       if (!e->loaded) continue;
       uint32_t fl = acc_flags(e);
       if (!fl) continue;
-      PackAcc* pa = (PackAcc*)w;
-      pa->addr = e->addr;
-      pa->flags = fl;
-      pa->nonce = e->nonce;
-      e->balance.to_be(pa->balance);
-      mem_copy(pa->code_hash, e->code_hash, 32);
-      pa->code_len = (fl & FEVM_ACC_CODE) ? e->code_len : 0;
-      w += sizeof(PackAcc);
+      mem_copy(w, e->addr.b, 20);
+      w = put_varint(w + 20, fl);
+      if (fl & FEVM_ACC_NONCE) w = put_varint(w, e->nonce);
+      if (fl & FEVM_ACC_BALANCE) w = put_word(w, e->balance);
       if (fl & FEVM_ACC_CODE) {
+        mem_copy(w, e->code_hash, 32);
+        w = put_varint(w + 32, e->code_len);
         mem_copy(w, ptr(e->code_loc), e->code_len);
-        w += pad8(e->code_len);
+        w += e->code_len;
       }
     }
+    prev = nullptr;
     for (uint32_t li = 0; li < hdr->n_slot; li++) {
       const Slot* e = &slots[slot_list[li]];
-      if (!e->loaded) continue;
-      const BaseSlot* b = base->find_slot(e->addr, e->key);
-      if (b && b->value == e->value) continue;
-      if (!b && e->value.is_zero()) continue;
-      PackSlot* ps = (PackSlot*)w;
-      ps->addr = e->addr;
-      ps->_pad = 0;
-      e->key.to_be(ps->key);
-      e->value.to_be(ps->value);
-      w += sizeof(PackSlot);
+      if (!slot_changed(e)) continue;
+      bool same = prev && addr_eq(*prev, e->addr);
+      *w++ = same ? 1 : 0;
+      if (!same) {
+        mem_copy(w, e->addr.b, 20);
+        w += 20;
+      }
+      w = put_word(w, e->key);
+      w = put_word(w, e->value);
+      prev = &e->addr;
     }
     for (uint32_t i = 0; i < nl; i++) {
       const LogRec* r = &logs[i];
-      PackLog* pl = (PackLog*)w;
-      pl->addr = r->addr;
-      pl->n_topics = r->n_topics;
-      for (uint32_t t = 0; t < 4; t++) {
-        if (t < r->n_topics)
-          r->topics[t].to_be(pl->topics[t]);
-        else
-          mem_zero(pl->topics[t], 32);
-      }
-      pl->data_len = r->data_len;
-      w += sizeof(PackLog);
+      mem_copy(w, r->addr.b, 20);
+      w[20] = (uint8_t)r->n_topics;
+      w += 21;
+      for (uint32_t t = 0; t < r->n_topics; t++) w = put_word(w, r->topics[t]);
+      w = put_varint(w, r->data_len);
       if (r->data_len) mem_copy(w, ptr(r->data_loc), r->data_len);
-      w += pad8(r->data_len);
+      w += r->data_len;
     }
     if (out_len) mem_copy(w, out, out_len);
     ctl->out_loc = off;

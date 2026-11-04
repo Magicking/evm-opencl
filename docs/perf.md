@@ -162,3 +162,31 @@ Candidates, in order:
 
 Nsight Compute is installed but needs counter access (`RmProfilingAdminOnly=1`), so the
 attributions above come from SASS inspection and timing experiments.
+
+## Compact result records
+
+The link is slower than assumed above: a pinned copy reaches **1.9 GB/s** in either direction for
+256 KB–32 MB (Gen3 ×4 negotiated, eGPU tunnel overhead), so every result byte costs about 0.5 ns.
+
+Result records (`pack()` in `src/evm/interpreter.cuh`, `unpack_result()` in `src/runtime/engine.cpp`)
+are now byte-oriented instead of fixed 8-byte-aligned structs:
+
+* varint counts and lengths;
+* account fields only when their flag is set (unflagged nonce, balance and code hash are refilled on
+  the host from the state cache the lane compared against);
+* 256-bit words without leading zero bytes;
+* a slot's address only when it differs from the previous slot's;
+* only the log's own topics, not four.
+
+The C ABI (`fevm_result`, `fevm_account_diff`, …) is unchanged.
+
+| workload | before | after |
+|---|---:|---:|
+| erc20 result record | 536 B | 261 B |
+| erc20 N=10k warm | 1.20M msg/s (8.3 ms; 3.8 ms transfer) | **1.57M msg/s** (6.3 ms; 2.4 ms transfer) |
+| erc20 N=10k cold | 0.97M msg/s | 1.16M msg/s |
+| storage_rw N=10k | 92k msg/s (48 ms transfer) | **157k msg/s** (3.7 ms transfer) |
+
+reth+JIT does 4.5M erc20 msg/s on the CPU. At about 72 B of calldata in and 261 B out per message,
+this link caps the GPU at roughly 6M msg/s for transfers alone, so the gap that remains is in the
+kernels and per-round waits.

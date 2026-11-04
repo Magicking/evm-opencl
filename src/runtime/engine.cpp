@@ -85,49 +85,90 @@ void bind_cache(fevm_batch* b) {
 
 // ------------------------------------------------------------------ results
 
-void unpack_result(const uint8_t* rec, LaneResult* out) {
-  const PackHdr* ph = (const PackHdr*)rec;
-  const uint8_t* p = rec + sizeof(PackHdr);
-  out->bytes.assign(p, rec + ph->total);  // stable backing store
-  const uint8_t* base = out->bytes.data();
-  const uint8_t* q = base;
-  out->accounts.resize(ph->n_acc);
-  for (uint32_t i = 0; i < ph->n_acc; i++) {
-    const PackAcc* pa = (const PackAcc*)q;
+static Address from_addr(const fevm_address& s) {
+  Address a;
+  memcpy(a.b, s.bytes, 20);
+  return a;
+}
+
+static uint64_t get_varint(const uint8_t*& p) {
+  uint64_t v = 0;
+  for (unsigned s = 0;; s += 7) {
+    uint8_t b = *p++;
+    v |= (uint64_t)(b & 0x7f) << s;
+    if (!(b & 0x80)) return v;
+  }
+}
+
+static void get_word(const uint8_t*& p, uint8_t out[32]) {
+  uint8_t n = *p++;
+  memset(out, 0, 32 - n);
+  memcpy(out + 32 - n, p, n);
+  p += n;
+}
+
+void unpack_result(const uint8_t* rec, uint64_t len, StateCache& cache, LaneResult* out) {
+  uint32_t total = (uint32_t)rec[0] | (uint32_t)rec[1] << 8 | (uint32_t)rec[2] << 16 | (uint32_t)rec[3] << 24;
+  if (total < 4 || total > len) {
+    *out = LaneResult{};
+    return;
+  }
+  out->bytes.assign(rec, rec + total);  // stable backing store for code, log data and output
+  const uint8_t* q = out->bytes.data() + 4;
+  uint32_t na = (uint32_t)get_varint(q), ns = (uint32_t)get_varint(q), nl = (uint32_t)get_varint(q);
+  uint64_t out_len = get_varint(q);
+  out->accounts.resize(na);
+  for (uint32_t i = 0; i < na; i++) {
     fevm_account_diff& d = out->accounts[i];
-    memcpy(d.address.bytes, pa->addr.b, 20);
-    d.flags = pa->flags;
-    d.nonce = pa->nonce;
-    memcpy(d.balance.bytes, pa->balance, 32);
-    memcpy(d.code_hash.bytes, pa->code_hash, 32);
-    q += sizeof(PackAcc);
-    d.code_len = pa->code_len;
-    d.code = pa->code_len ? q : nullptr;
-    q += pad8(pa->code_len);
+    memcpy(d.address.bytes, q, 20);
+    q += 20;
+    d.flags = (uint32_t)get_varint(q);
+    const BaseAccount* b = cache.find_account(from_addr(d.address));
+    d.nonce = (d.flags & FEVM_ACC_NONCE) ? get_varint(q) : (b ? b->nonce : 0);
+    if (d.flags & FEVM_ACC_BALANCE)
+      get_word(q, d.balance.bytes);
+    else if (b)
+      b->balance.to_be(d.balance.bytes);
+    else
+      memset(d.balance.bytes, 0, 32);
+    d.code = nullptr;
+    d.code_len = 0;
+    if (d.flags & FEVM_ACC_CODE) {
+      memcpy(d.code_hash.bytes, q, 32);
+      q += 32;
+      d.code_len = get_varint(q);
+      d.code = d.code_len ? q : nullptr;
+      q += d.code_len;
+    } else {
+      memcpy(d.code_hash.bytes, b ? b->code_hash : empty_code_hash(), 32);
+    }
   }
-  out->slots.resize(ph->n_slot);
-  for (uint32_t i = 0; i < ph->n_slot; i++) {
-    const PackSlot* ps = (const PackSlot*)q;
+  out->slots.resize(ns);
+  for (uint32_t i = 0; i < ns; i++) {
     fevm_slot_diff& d = out->slots[i];
-    memcpy(d.address.bytes, ps->addr.b, 20);
-    memcpy(d.key.bytes, ps->key, 32);
-    memcpy(d.value.bytes, ps->value, 32);
-    q += sizeof(PackSlot);
+    if (*q++ == 0) {
+      memcpy(d.address.bytes, q, 20);
+      q += 20;
+    } else {
+      d.address = out->slots[i - 1].address;
+    }
+    get_word(q, d.key.bytes);
+    get_word(q, d.value.bytes);
   }
-  out->logs.resize(ph->n_log);
-  for (uint32_t i = 0; i < ph->n_log; i++) {
-    const PackLog* pl = (const PackLog*)q;
+  out->logs.resize(nl);
+  for (uint32_t i = 0; i < nl; i++) {
     fevm_log& d = out->logs[i];
-    memcpy(d.address.bytes, pl->addr.b, 20);
-    d.n_topics = pl->n_topics;
-    memcpy(d.topics, pl->topics, sizeof(d.topics));
-    q += sizeof(PackLog);
-    d.data_len = pl->data_len;
-    d.data = pl->data_len ? q : nullptr;
-    q += pad8(pl->data_len);
+    memcpy(d.address.bytes, q, 20);
+    d.n_topics = q[20];
+    q += 21;
+    memset(d.topics, 0, sizeof(d.topics));
+    for (uint32_t t = 0; t < d.n_topics; t++) get_word(q, d.topics[t].bytes);
+    d.data_len = get_varint(q);
+    d.data = d.data_len ? q : nullptr;
+    q += d.data_len;
   }
-  out->r.output_len = ph->out_len;
-  out->r.output = ph->out_len ? q : nullptr;
+  out->r.output_len = out_len;
+  out->r.output = out_len ? q : nullptr;
   out->r.n_accounts = (uint32_t)out->accounts.size();
   out->r.accounts = out->accounts.data();
   out->r.n_slots = (uint32_t)out->slots.size();
@@ -139,11 +180,6 @@ void unpack_result(const uint8_t* rec, LaneResult* out) {
 // ------------------------------------------------------------------ round loop
 
 static void to_addr(fevm_address* d, const Address& s) { memcpy(d->bytes, s.b, 20); }
-static Address from_addr(const fevm_address& s) {
-  Address a;
-  memcpy(a.b, s.bytes, 20);
-  return a;
-}
 
 }  // namespace fevm
 
@@ -242,8 +278,8 @@ int Backend::execute(fevm_batch* b, const std::vector<uint32_t>& lanes, const fe
       LaneCtl& c = b->ctl[lane];
       LaneResult& lr = b->results[lane];
       lr.r = fevm_result{};
-      if (c.result_status != FEVM_STATUS_FALLBACK && c.out_loc != LOC_NONE && c.out_loc + sizeof(PackHdr) <= pool_len)
-        unpack_result(pool + c.out_loc, &lr);
+      if (c.result_status != FEVM_STATUS_FALLBACK && c.out_loc != LOC_NONE && c.out_loc + 4 <= pool_len)
+        unpack_result(pool + c.out_loc, pool_len - c.out_loc, b->eng->cache, &lr);
       else
         lr = LaneResult{};
       lr.r.status = c.result_status;

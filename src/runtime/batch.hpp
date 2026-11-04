@@ -108,6 +108,7 @@ std::unique_ptr<Backend> make_cpu_backend(const fevm_config& cfg);
 std::unique_ptr<Backend> make_gpu_backend(const fevm_config& cfg, const char** err);
 bool gpu_available();
 
-void unpack_result(const uint8_t* rec, LaneResult* out);
+// Decodes a packed result record; unchanged account fields come from the cache.
+void unpack_result(const uint8_t* rec, uint64_t len, StateCache& cache, LaneResult* out);
 
 }  // namespace fevm
