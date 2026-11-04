@@ -115,6 +115,28 @@ def main():
                 row["name"], row["n"], " | ".join(rate(v) for v in vals), rate(c), rate(gp),
                 " ⚠retry" if retried else "", rate(gw), ratio(gp, vals[0]), ratio(gw, vals[0])))
         print()
+    before_path = os.path.join(os.path.dirname(path), "full_v2.json")
+    if "B" in r and os.path.exists(before_path) and os.path.abspath(before_path) != os.path.abspath(path):
+        before = {(b["name"], b["n"]): b for b in json.load(open(before_path)).get("B", [])}
+        rows = [b for b in r["B"] if b["name"] == "erc20_transfer" and "fastevm_gpu_warm" in b
+                and ("erc20_transfer", b["n"]) in before]
+        if rows:
+            print("## GPU state cache: erc20_transfer before and after\n")
+            print("Messages/second on the GPU. Before: the engine without the state cache (`%s`), which "
+                  "re-uploaded the whole state tables every round and started every batch empty. Cold: contract "
+                  "code stays in GPU memory across batches, only changed table entries are uploaded and rounds "
+                  "download compact events. Warm: the batch repeats on the same state id, so accounts and storage "
+                  "also come from GPU memory. Details and the remaining bottlenecks: `docs/perf.md`.\n" %
+                  os.path.relpath(before_path, os.path.dirname(HERE)))
+            print("| N | before | cold | warm | %s | warm vs before | %s vs warm |" % (LABEL[ref], LABEL[ref]))
+            print("|---:|---:|---:|---:|---:|---:|---:|")
+            for b in rows:
+                pre = get(before[("erc20_transfer", b["n"])]["fastevm_gpu"], "msgs_per_s")
+                cold, warm = get(b["fastevm_gpu"], "msgs_per_s"), get(b["fastevm_gpu_warm"], "msgs_per_s")
+                rv = get(b.get(ref, {}), "msgs_per_s")
+                print("| %d | %s | %s | %s | %s | %s | %s |" % (
+                    b["n"], rate(pre), rate(cold), rate(warm), rate(rv), ratio(warm, pre), ratio(rv, warm)))
+            print()
     if "C" in r:
         print("## C. Block import (reth `re-execute --num-tasks 1`, synthetic Osaka chains)\n")
         print("Chains from `bench/makechain` (go-ethereum `GenerateChain`, 60M-gas blocks), imported into reth, "

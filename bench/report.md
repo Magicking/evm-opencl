@@ -102,6 +102,17 @@ Messages/second (median of runs). Ratios are fastevm against reth+JIT.
 | snailtracer | 64 | 832 | 372 | 112 | 28 | 326 | 19 | 19 | 0.02× | 0.02× |
 | snailtracer | 1000 | 822 | 378 | 104 | 30 | 318 | 104 | 104 | 0.13× | 0.13× |
 
+## GPU state cache: erc20_transfer before and after
+
+Messages/second on the GPU. Before: the engine without the state cache (`bench/results/full_v2.json`), which re-uploaded the whole state tables every round and started every batch empty. Cold: contract code stays in GPU memory across batches, only changed table entries are uploaded and rounds download compact events. Warm: the batch repeats on the same state id, so accounts and storage also come from GPU memory. Details and the remaining bottlenecks: `docs/perf.md`.
+
+| N | before | cold | warm | reth+JIT | warm vs before | reth+JIT vs warm |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 774 | 4.0k | 6.7k | 9.3k | 8.68× | 1.39× |
+| 64 | 40.8k | 128.5k | 179.1k | 635.7k | 4.38× | 3.55× |
+| 1000 | 329.3k | 577.2k | 894.2k | 3.20M | 2.72× | 3.58× |
+| 10000 | 434.9k | 973.0k | 1.21M | 4.50M | 2.77× | 3.74× |
+
 ## C. Block import (reth `re-execute --num-tasks 1`, synthetic Osaka chains)
 
 Chains from `bench/makechain` (go-ethereum `GenerateChain`, 60M-gas blocks), imported into reth, then re-executed in order against parent state with receipt validation. fastevm runs every top-level frame through reth's evm2 `InterpreterRunner` hook, **one message per batch**.
